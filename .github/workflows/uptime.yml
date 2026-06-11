@@ -1,6 +1,6 @@
 # External uptime probe for the Sole Society API.
 #
-# Lives in its own PUBLIC repo so the 5-minute schedule costs zero Actions
+# Lives in its own PUBLIC repo so the hourly schedule costs zero Actions
 # minutes (public repos are not billed). Alerts via Telegram on the
 # up -> down transition, re-nags hourly while down, and announces recovery.
 # Healthy runs are silent except a daily heartbeat commit, which doubles as
@@ -14,7 +14,7 @@ name: Uptime
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '7 * * * *'
   workflow_dispatch:
     inputs:
       url:
@@ -75,10 +75,10 @@ jobs:
             echo "API is up."
           else
             if [ "$prev" = up ]; then
-              send "Sole Society uptime: DOWN — $URL failed 3 probes over ~30s. The API Worker may be unreachable."
+              send "Sole Society uptime: DOWN — $URL failed 3 probes over ~30s. The API Worker may be unreachable. Re-checking hourly."
               commit_state down
             elif [ $((now - last)) -ge 3600 ]; then
-              send "Sole Society uptime: still DOWN — $URL (since state change, re-checking every 5 min)."
+              send "Sole Society uptime: still DOWN — $URL (re-checking hourly)."
               commit_state down
             fi
             echo "::error::$URL is down"

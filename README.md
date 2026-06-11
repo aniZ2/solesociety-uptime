@@ -1,7 +1,7 @@
 # solesociety-uptime
 
-External uptime probe for the Sole Society API, running on a 5-minute
-GitHub Actions schedule. Public repo on purpose: scheduled workflows in
+External uptime probe for the Sole Society API, running on an hourly
+GitHub Actions schedule (minute 7, dodging top-of-hour cron congestion). Public repo on purpose: scheduled workflows in
 public repos consume no billed Actions minutes.
 
 - Probes the API Worker's `/health` endpoint (workers.dev origin).
