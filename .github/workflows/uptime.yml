@@ -1,0 +1,86 @@
+# External uptime probe for the Sole Society API.
+#
+# Lives in its own PUBLIC repo so the 5-minute schedule costs zero Actions
+# minutes (public repos are not billed). Alerts via Telegram on the
+# up -> down transition, re-nags hourly while down, and announces recovery.
+# Healthy runs are silent except a daily heartbeat commit, which doubles as
+# the activity GitHub requires to keep scheduled workflows enabled.
+#
+# This is the one leg the API Worker's own cron cannot cover: the Worker
+# being dead. The probe targets the workers.dev origin because the custom
+# domain's bot protection 403s datacenter IPs (see the main repo's
+# docs/ops/monitoring.md).
+name: Uptime
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'Override probe URL (transition testing only)'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe and alert
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          URL: ${{ inputs.url || 'https://solesociety-api.anitaivlove.workers.dev/health' }}
+        run: |
+          send() {
+            curl -fsS --max-time 10 -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              -H 'Content-Type: application/json' \
+              -d "$(jq -n --arg c "$TELEGRAM_CHAT_ID" --arg t "$1" '{chat_id:$c, text:$t, disable_web_page_preview:true}')" > /dev/null || true
+          }
+
+          up=false
+          for attempt in 1 2 3; do
+            if curl -fsS --max-time 15 "$URL" > /dev/null; then
+              up=true
+              break
+            fi
+            echo "probe attempt $attempt failed"
+            sleep 10
+          done
+
+          prev=$(cat state 2>/dev/null || echo up)
+          last=$(cat state_at 2>/dev/null || echo 0)
+          now=$(date -u +%s)
+
+          git config user.name 'uptime-probe'
+          git config user.email 'uptime-probe@users.noreply.github.com'
+          commit_state() {
+            echo "$1" > state
+            echo "$now" > state_at
+            git add state state_at
+            git commit -qm "state: $1" || true
+            git push -q || true
+          }
+
+          if [ "$up" = true ]; then
+            if [ "$prev" = down ]; then
+              send "Sole Society uptime: RECOVERED — $URL is answering again."
+              commit_state up
+            elif [ $((now - last)) -ge 86400 ]; then
+              commit_state up
+            fi
+            echo "API is up."
+          else
+            if [ "$prev" = up ]; then
+              send "Sole Society uptime: DOWN — $URL failed 3 probes over ~30s. The API Worker may be unreachable."
+              commit_state down
+            elif [ $((now - last)) -ge 3600 ]; then
+              send "Sole Society uptime: still DOWN — $URL (since state change, re-checking every 5 min)."
+              commit_state down
+            fi
+            echo "::error::$URL is down"
+            exit 1
+          fi
